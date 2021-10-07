@@ -7,6 +7,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/IR/Module.h"
+
 using namespace llvm;
 
 namespace {
@@ -27,12 +28,42 @@ namespace {
       return true;
     }
 
-    bool shouldCheckOverflow(Value *I, int depth) {
+    bool shouldCheckOverflow(Instruction *I, int depth) {
       // TODO: implement simple dataflow analysis to see if the computed data is
       // flowing into malloc().
-
-
-      return true;
+      bool flow = false;
+      BasicBlock &B = *I->getParent();
+      for(auto &II : B){
+        int opc = (&II)->getOpcode();
+        if(opc == 31 && dyn_cast<Instruction>((&II)->getOperand(0)) == I){
+          flow = flow || shouldCheckOverflow(dyn_cast<Instruction>((&II)->getOperand(1)), ++depth);
+        }
+        else if((opc == 30 || opc == 37) && (&II)->getOperand(0) == I){
+          flow = flow || shouldCheckOverflow(&II, ++depth);
+        }
+        else if(opc == 54 && (&II)->getOperand(0) == I){
+//          errs()<<"Check point! : "<<II<<"\n";
+          flow = flow || true;
+        }
+      }
+/*
+      Instruction* ii = (I)->getNextNode();
+      if(ii == nullptr) return false;
+//      errs()<<depth<<" : "<<*ii<<"\n";
+      if(ii->getOpcode() == 31 && ii->getOperand(0) == I) {
+        errs()<<*ii->getOperand(1)<<"\n";
+//        shouldCheckOverflow(dyn_cast<Instruction>(ii->getOperand(1)), ++depth);
+      }
+      else if(ii->getOperand(0) == I || ii->getOperand(1) == I){
+        if(isa<CallInst>(ii)){
+          errs()<<"call point\n";
+        }
+        else{
+          shouldCheckOverflow(ii, ++depth);
+        }
+      }
+      */
+      return flow;
     }
 
     Value* getLineNum(Instruction *I) {
@@ -45,9 +76,12 @@ namespace {
 
     virtual bool runOnFunction(Function &F) {
       bool res = false;
-
       for (auto &B : F) {
+//        errs()<<((isa<BasicBlock>(&B))?"block---------------------------":"")<<"\n";
+//        errs()<<"vvs "<<&B<<": "<<B<<"\n";
         for (auto &I : B) {
+//            if(1 || isa<CallInst>(&I)) errs()<<"i:"<<(&I)->getOpcode()<<I<<"\n";
+//            if((&I)->getOpcode() != 1) errs()<<"i:"<<(&I)->getOpcode()<<*((&I)->getOperand(0))<<"\n";
           if (auto *op = dyn_cast<BinaryOperator>(&I)) {
             // TODO: Implement the shouldCheckOverflow() function.
             if (!shouldCheckOverflow(&I, 0))
@@ -59,7 +93,8 @@ namespace {
             // TODO: Pass more information including operands of computations.
             IRBuilder<> builder(op);
             builder.SetInsertPoint(&B, ++builder.GetInsertPoint());
-            Value* args[] = {op, getLineNum(&I)};
+            
+            Value* args[] = {op, op->getOperand(0), op->getOperand(1), getLineNum(&I)};
             builder.CreateCall(logFunc, args);
             res |= true;
           }
